@@ -13,7 +13,7 @@ The 800×600 landscape design is rotated into a 600×800 Kindle PNG. The dashboa
 
 ![Sample token dashboard](docs/sample-dashboard.png)
 
-This preview uses synthetic values. The live dashboard reads the two provider APIs described below.
+This is a current rendered screen preview using the same layout as the Kindle dashboard. Values change as the provider quotas change; the live dashboard reads the two provider APIs described below.
 
 ## Data and credentials
 
