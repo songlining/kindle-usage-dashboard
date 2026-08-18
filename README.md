@@ -53,6 +53,14 @@ bin/kindle-usage-png.py --output /tmp/kindle-usage-dashboard.png
 The default rotation is 270° (`KINDLE_USAGE_ROTATION=270`). Use `0`, `90`, or
 `180` if the physical Kindle orientation differs.
 
+## Reboot behavior
+
+- **Mac reboot:** the plist in `~/Library/LaunchAgents` is loaded automatically when the user logs in. `RunAtLoad` performs an immediate refresh, then `StartInterval` retries every five minutes.
+- **Kindle reboot:** the image is stored under `/mnt/us/extensions/` and the Mac pushes it again on the next scheduled run once SSH and `eips` are ready.
+- **Kindle unplugged or still booting:** the push is skipped safely; the next interval retries it.
+
+This is a per-user LaunchAgent, so the Mac user must log in after reboot. A pre-login, headless setup would require a separate LaunchDaemon configuration.
+
 ## Useful diagnostics
 
 ```bash
