@@ -34,4 +34,12 @@ with tempfile.TemporaryDirectory() as directory:
     assert sum(pixel < 128 for pixel in Image.open(landscape).getdata()) > 1000
     assert renderer.format_reset(1787018940183) != "-"
 
+    reset = 1_000_000
+    duration = 100_000
+    assert renderer.time_progress(reset, duration, now_ms=reset - duration * 1000) == 0
+    assert renderer.time_progress(reset, duration, now_ms=reset - duration * 500) == 50
+    assert renderer.time_progress(reset, duration, now_ms=reset) == 100
+    assert renderer.time_progress(None, duration, now_ms=reset) is None
+    assert renderer.time_progress(reset, 0, now_ms=reset) is None
+
 print("ok")

@@ -2,9 +2,9 @@
 """Render GLM CN and OpenCode Go quotas in a Kindle-sized token dashboard.
 
 The visual layout borrows the reference Kindle dashboard: title and timestamp,
-a heavy rule, bordered provider cards, percentage rows, progress bars, and reset
-labels. The working canvas is 800x600 landscape and is rotated to a 600x800
-Kindle PNG by default.
+a heavy rule, bordered provider cards, black usage fills, gray time markers,
+and reset labels. The working canvas is 800x600 landscape and is rotated to a
+600x800 Kindle PNG by default.
 """
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -53,7 +54,7 @@ def format_percent(value) -> str:
         number = float(value)
     except (TypeError, ValueError):
         return "-"
-    return f"{number:g}%"
+    return f"{int(round(number))}%"
 
 
 def numeric_percent(value) -> float | None:
@@ -70,6 +71,21 @@ def format_reset(reset_ms) -> str:
         return "-"
 
 
+def time_progress(reset_ms, duration_seconds: int, now_ms=None) -> float | None:
+    """Return elapsed percentage for a window ending at reset_ms."""
+    if reset_ms is None or duration_seconds <= 0:
+        return None
+    try:
+        reset = float(reset_ms)
+        now = time.time() * 1000 if now_ms is None else float(now_ms)
+    except (TypeError, ValueError):
+        return None
+    # ponytail: infer the start from the displayed 5h/7d/30d duration; exact
+    # rolling/calendar-window starts would require provider start timestamps.
+    duration_ms = duration_seconds * 1000
+    return max(0.0, min(100.0, (now - (reset - duration_ms)) / duration_ms * 100.0))
+
+
 def truncate(draw: ImageDraw.ImageDraw, text: str, text_font, max_width: int) -> str:
     if draw.textlength(text, font=text_font) <= max_width:
         return text
@@ -79,9 +95,9 @@ def truncate(draw: ImageDraw.ImageDraw, text: str, text_font, max_width: int) ->
     return text + suffix
 
 
-def draw_progress(draw: ImageDraw.ImageDraw, x: int, y: int, width: int, height: int, percent: float | None) -> None:
+def draw_progress(draw: ImageDraw.ImageDraw, x: int, y: int, width: int, height: int, percent: float | None, fill=FG, outline=FG) -> None:
     border = 3
-    draw.rectangle((x, y, x + width, y + height), outline=FG, width=border)
+    draw.rectangle((x, y, x + width, y + height), outline=outline, width=border)
     if percent is None or percent <= 0:
         return
     inner_width = width - 2 * border
@@ -89,8 +105,19 @@ def draw_progress(draw: ImageDraw.ImageDraw, x: int, y: int, width: int, height:
     if fill_width:
         draw.rectangle(
             (x + border, y + border, x + border + fill_width - 1, y + height - border),
-            fill=FG,
+            fill=fill,
         )
+
+
+def draw_time_marker(draw: ImageDraw.ImageDraw, x: int, y: int, width: int, height: int, percent: float | None) -> None:
+    if percent is None:
+        return
+    border = 3
+    marker_x = x + round((width - 2 * border) * percent / 100) + border
+    marker_x = max(x + border, min(x + width - border, marker_x))
+    # White halo keeps the gray marker visible when it falls inside the black usage fill.
+    draw.rectangle((marker_x - 3, y, marker_x + 3, y + height), fill=BG)
+    draw.rectangle((marker_x - 1, y, marker_x + 1, y + height), fill=MUTED)
 
 
 def draw_reset(draw: ImageDraw.ImageDraw, x: int, y: int, reset_ms, regular, bold) -> None:
@@ -101,10 +128,13 @@ def draw_reset(draw: ImageDraw.ImageDraw, x: int, y: int, reset_ms, regular, bol
     draw.text((x + prefix_width, y), value, font=bold, fill=FG)
 
 
-def draw_card(draw: ImageDraw.ImageDraw, x: int, y: int, width: int, height: int, title: str, provider: dict, title_font, label_font, regular, bold) -> None:
+def draw_card(draw: ImageDraw.ImageDraw, x: int, y: int, width: int, height: int, title: str, provider: dict, title_font, label_font, metric_font, legend_font, regular, bold) -> None:
     draw.rectangle((x, y, x + width, y + height), outline=FG, width=4)
     pad = 18
     draw.text((x + pad, y + 14), title, font=title_font, fill=FG)
+    legend = "U=used  T=time"
+    legend_width = draw.textlength(legend, font=legend_font)
+    draw.text((x + width - pad - legend_width, y + 24), legend, font=legend_font, fill=MUTED)
     draw.line((x + pad, y + 58, x + width - pad, y + 58), fill=FG, width=2)
 
     error = provider.get("error") if isinstance(provider, dict) else "unavailable"
@@ -115,29 +145,31 @@ def draw_card(draw: ImageDraw.ImageDraw, x: int, y: int, width: int, height: int
         return
 
     windows = (
-        ("5h", "fiveHour"),
-        ("7d", "weekly"),
-        ("30d", "monthly"),
+        ("5h", "fiveHour", 5 * 60 * 60),
+        ("7d", "weekly", 7 * 24 * 60 * 60),
+        ("30d", "monthly", 30 * 24 * 60 * 60),
     )
     if title == "OpenCode Go":
         windows = (
-            ("5h", "rolling"),
-            ("7d", "weekly"),
-            ("30d", "monthly"),
+            ("5h", "rolling", 5 * 60 * 60),
+            ("7d", "weekly", 7 * 24 * 60 * 60),
+            ("30d", "monthly", 30 * 24 * 60 * 60),
         )
 
     row_x = x + pad
     row_width = width - 2 * pad
     row_y = y + 78
     row_step = 124
-    for label, key in windows:
+    for label, key, duration_seconds in windows:
         item = provider.get(key) or {}
         percent = numeric_percent(item.get("percentage"))
+        elapsed = time_progress(item.get("resetMs"), duration_seconds)
         draw.text((row_x, row_y), label, font=label_font, fill=FG)
-        pct = format_percent(item.get("percentage"))
-        pct_width = draw.textlength(pct, font=label_font)
-        draw.text((row_x + row_width - pct_width, row_y), pct, font=label_font, fill=FG)
+        metrics = f"U {format_percent(item.get('percentage'))}  T {format_percent(elapsed)}"
+        metrics_width = draw.textlength(metrics, font=metric_font)
+        draw.text((row_x + row_width - metrics_width, row_y + 2), metrics, font=metric_font, fill=FG)
         draw_progress(draw, row_x, row_y + 30, row_width, 26, percent)
+        draw_time_marker(draw, row_x, row_y + 30, row_width, 26, elapsed)
         draw_reset(draw, row_x, row_y + 66, item.get("resetMs"), regular, bold)
         row_y += row_step
 
@@ -150,6 +182,8 @@ def render(usage: dict, output: Path, rotation: int = 270) -> None:
     stamp_font = font(FONT_REGULAR, 18)
     card_title_font = font(FONT_BOLD, 28)
     label_font = font(FONT_BOLD, 20)
+    metric_font = font(FONT_BOLD, 16)
+    legend_font = font(FONT_REGULAR, 13)
     regular = font(FONT_REGULAR, 17)
     bold = font(FONT_BOLD, 17)
 
@@ -161,8 +195,8 @@ def render(usage: dict, output: Path, rotation: int = 270) -> None:
 
     glm = usage.get("glm") or {"error": "no usage data"}
     go = usage.get("go") or {"error": "no usage data"}
-    draw_card(draw, MARGIN, CARD_Y, CARD_W, CARD_H, "GLM Coding (CN)", glm, card_title_font, label_font, regular, bold)
-    draw_card(draw, MARGIN + CARD_W + CARD_GAP, CARD_Y, CARD_W, CARD_H, "OpenCode Go", go, card_title_font, label_font, regular, bold)
+    draw_card(draw, MARGIN, CARD_Y, CARD_W, CARD_H, "GLM Coding (CN)", glm, card_title_font, label_font, metric_font, legend_font, regular, bold)
+    draw_card(draw, MARGIN + CARD_W + CARD_GAP, CARD_Y, CARD_W, CARD_H, "OpenCode Go", go, card_title_font, label_font, metric_font, legend_font, regular, bold)
 
     if rotation not in (0, 90, 180, 270):
         raise ValueError("rotation must be 0, 90, 180, or 270")

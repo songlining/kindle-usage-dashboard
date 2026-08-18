@@ -5,9 +5,9 @@ A small Mac-side dashboard for a jailbroken Kindle. It displays usage for:
 - **GLM Coding (CN)** via `open.bigmodel.cn`
 - **OpenCode Go** via `opencode.ai/zen/go/v1/usage`
 
-The visual layout is inspired by the reference [`kindle-dashboard`](https://github.com/alexishida/kindle-dashboard): a title and timestamp, a heavy divider, bordered provider cards, percentage progress bars, and reset times. This repository is independently implemented; it does not copy source code or assets from that project and is not affiliated with or endorsed by it, Zhipu AI/GLM, or OpenCode.
+The visual layout is inspired by the reference [`kindle-dashboard`](https://github.com/alexishida/kindle-dashboard): a title and timestamp, a heavy divider, bordered provider cards, percentage progress bars, and reset times. Each quota bar uses black for **quota used** and a gray marker for **time elapsed**; the `U` and `T` percentages make the comparison explicit. This repository is independently implemented; it does not copy source code or assets from that project and is not affiliated with or endorsed by it, Zhipu AI/GLM, or OpenCode.
 
-The 800×600 landscape design is rotated into a 600×800 Kindle PNG.
+The 800×600 landscape design is rotated into a 600×800 Kindle PNG. The dashboard refreshes every five minutes so the time marker keeps moving even when quota values do not change.
 
 ## Preview
 

@@ -24,6 +24,7 @@ new_state="$($PYTHON - "$USAGE" <<'PY'
 import hashlib
 import json
 import sys
+import time
 from pathlib import Path
 
 path = Path(sys.argv[1])
@@ -42,7 +43,9 @@ def stable(value):
         return [stable(v) for v in value]
     return value
 
-encoded = json.dumps(stable(data), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+# The time marker is display state too; refresh at the launchd cadence even when quotas are unchanged.
+payload = {"data": stable(data), "timeBucket": int(time.time() // 300)}
+encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
 print(hashlib.sha256(encoded).hexdigest())
 PY
 )"
