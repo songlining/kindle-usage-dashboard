@@ -1,0 +1,13 @@
+{
+  "fetchedAt": "2026-08-18T12:00:00+10:00",
+  "glm": {
+    "fiveHour": {"percentage": 35, "resetMs": 1787027400000},
+    "weekly": {"percentage": 62, "resetMs": 1787281200000},
+    "monthly": {"percentage": 18, "resetMs": 1789354800000}
+  },
+  "go": {
+    "rolling": {"percentage": 48, "resetMs": 1787029200000},
+    "weekly": {"percentage": 27, "resetMs": 1787529600000},
+    "monthly": {"percentage": 71, "resetMs": 1788991200000}
+  }
+}

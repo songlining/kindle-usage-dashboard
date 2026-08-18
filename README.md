@@ -5,9 +5,15 @@ A small Mac-side dashboard for a jailbroken Kindle. It displays usage for:
 - **GLM Coding (CN)** via `open.bigmodel.cn`
 - **OpenCode Go** via `opencode.ai/zen/go/v1/usage`
 
-The visual layout borrows the reference `kindle-dashboard`: a title and timestamp,
-a heavy divider, bordered provider cards, percentage progress bars, and reset times.
+The visual layout is inspired by the reference [`kindle-dashboard`](https://github.com/alexishida/kindle-dashboard): a title and timestamp, a heavy divider, bordered provider cards, percentage progress bars, and reset times. This repository is independently implemented; it does not copy source code or assets from that project and is not affiliated with or endorsed by it, Zhipu AI/GLM, or OpenCode.
+
 The 800×600 landscape design is rotated into a 600×800 Kindle PNG.
+
+## Preview
+
+![Sample token dashboard](docs/sample-dashboard.png)
+
+This preview uses synthetic values. The live dashboard reads the two provider APIs described below.
 
 ## Data and credentials
 
@@ -52,5 +58,5 @@ The default rotation is 270° (`KINDLE_USAGE_ROTATION=270`). Use `0`, `90`, or
 ```bash
 bin/kindle-usbnet-diagnose.sh --log
 bin/kindle-usbnet-diagnose.sh --fix --log
- tail -f /tmp/kindle-usage-dashboard.out.log /tmp/kindle-usage-dashboard.err.log
+tail -f /tmp/kindle-usage-dashboard.out.log /tmp/kindle-usage-dashboard.err.log
 ```
