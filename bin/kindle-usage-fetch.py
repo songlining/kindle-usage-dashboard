@@ -63,7 +63,7 @@ def window(percent, reset) -> dict:
     return {"percentage": percent, "resetMs": epoch_ms(reset)}
 
 
-def glm_monthly_tokens(key: str, start_ms: int, attempts: int = 3) -> int | None:
+def glm_monthly_tokens(key: str, start_ms: int, reset_ms: int, attempts: int = 3) -> int | None:
     """Sum tokens since start_ms; None if the API keeps serving stale caches.
 
     model-usage intermittently returns cached series that understate usage,
@@ -79,6 +79,7 @@ def glm_monthly_tokens(key: str, start_ms: int, attempts: int = 3) -> int | None
     end = datetime.now(timezone.utc).strftime(fmt)
     query = urlencode({"startTime": start, "endTime": end}, quote_via=quote)
     span_ms = datetime.now(timezone.utc).timestamp() * 1000 - start_ms
+    floor_tokens = previous_monthly_tokens(reset_ms)
     for _ in range(attempts):
         try:
             data = (get_json(f"{GLM_USAGE_URL}?{query}", key).get("data") or {})
@@ -94,9 +95,31 @@ def glm_monthly_tokens(key: str, start_ms: int, attempts: int = 3) -> int | None
                 if not (0.7 * expected <= len(buckets) <= 1.3 * expected + 2):
                     _reject("truncated-series", f"{len(buckets)} buckets vs ~{expected:.0f} expected", buckets)
                     continue
-                return sum(data.get("tokensUsage") or [])
+                total = sum(data.get("tokensUsage") or [])
+                # Window start is fixed until reset, so usage is monotonic within
+                # a cycle. A drop vs the last validated reading catches stale
+                # forms that pass every shape check (observed: right start and
+                # bucket count, near-zero tokens).
+                if floor_tokens is not None and total < floor_tokens:
+                    _reject("monotonic-violation", f"{total:,} < previous {floor_tokens:,}", buckets)
+                    return None
+                return total
         except (KeyError, ValueError, OSError):
             pass  # retry; a None return renders as "U -" rather than a lie
+    return None
+
+
+def previous_monthly_tokens(reset_ms: int) -> int | None:
+    """Token floor from the last persisted reading of the same cycle."""
+    try:
+        prior = json.loads(OUT.read_text())
+        monthly = (prior.get("glm") or {}).get("monthly") or {}
+        pct = monthly.get("percentage")
+        if monthly.get("resetMs") == reset_ms and isinstance(pct, (int, float)):
+            # One percentage point of headroom absorbs rounding drift.
+            return round((pct - 1) / 100 * GLM_MONTHLY_CAPACITY)
+    except (OSError, ValueError, AttributeError):
+        pass
     return None
 
 
@@ -130,7 +153,7 @@ def fetch_glm() -> dict:
         reset_ms = epoch_ms(monthly_cycle.get("nextResetTime"))
         if reset_ms:
             start_ms = reset_ms - 30 * 24 * 60 * 60 * 1000
-            used = glm_monthly_tokens(key, start_ms)
+            used = glm_monthly_tokens(key, start_ms, reset_ms)
             monthly = {
                 "percentage": None if used is None else round(used / GLM_MONTHLY_CAPACITY * 100),
                 "resetMs": reset_ms,
