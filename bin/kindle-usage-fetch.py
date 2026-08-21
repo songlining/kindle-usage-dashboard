@@ -66,15 +66,19 @@ def window(percent, reset) -> dict:
 def glm_monthly_tokens(key: str, start_ms: int, attempts: int = 3) -> int | None:
     """Sum tokens since start_ms; None if the API keeps serving stale caches.
 
-    model-usage intermittently returns a cached series for the wrong range
-    (observed: full history with a tiny tail), which would silently understate
-    the bar. A valid response's first bucket sits at the requested start; a
-    36h tolerance absorbs the daily/hourly and Beijing-time bucket offsets.
+    model-usage intermittently returns cached series that understate usage,
+    in two observed forms: full history starting months early, and a
+    right-starting but truncated series with a tiny token tail. A valid
+    response must start at the requested window (36h tolerance absorbs
+    daily/hourly granularity and Beijing-time bucket edges) AND contain a
+    bucket count matching the requested span (+/-30%). Rejected responses
+    are logged for diagnosis.
     """
     fmt = "%Y-%m-%d %H:%M:%S"
     start = datetime.fromtimestamp(start_ms / 1000, tz=timezone.utc).strftime(fmt)
     end = datetime.now(timezone.utc).strftime(fmt)
     query = urlencode({"startTime": start, "endTime": end}, quote_via=quote)
+    span_ms = datetime.now(timezone.utc).timestamp() * 1000 - start_ms
     for _ in range(attempts):
         try:
             data = (get_json(f"{GLM_USAGE_URL}?{query}", key).get("data") or {})
@@ -82,11 +86,28 @@ def glm_monthly_tokens(key: str, start_ms: int, attempts: int = 3) -> int | None
             if buckets:
                 first = str(buckets[0])[:16]
                 parsed = datetime.fromisoformat(first).timestamp() * 1000
-                if abs(parsed - start_ms) <= 36 * 3600 * 1000:
-                    return sum(data.get("tokensUsage") or [])
+                if abs(parsed - start_ms) > 36 * 3600 * 1000:
+                    _reject("starts-too-early", first, buckets)
+                    continue
+                unit_ms = 86_400_000 if data.get("granularity") == "daily" else 3_600_000
+                expected = span_ms / unit_ms
+                if not (0.7 * expected <= len(buckets) <= 1.3 * expected + 2):
+                    _reject("truncated-series", f"{len(buckets)} buckets vs ~{expected:.0f} expected", buckets)
+                    continue
+                return sum(data.get("tokensUsage") or [])
         except (KeyError, ValueError, OSError):
             pass  # retry; a None return renders as "U -" rather than a lie
     return None
+
+
+def _reject(reason: str, detail: str, buckets: list) -> None:
+    line = f"{datetime.now(timezone.utc).isoformat(timespec='seconds')} {reason}: {detail} first={str(buckets[:1])}"
+    try:
+        log = Path("/tmp/kindle-usage-fetch.rejected.log")
+        previous = log.read_text().splitlines()[-19:] if log.exists() else []
+        log.write_text("\n".join(previous + [line]) + "\n")
+    except OSError:
+        pass
 
 
 def fetch_glm() -> dict:
