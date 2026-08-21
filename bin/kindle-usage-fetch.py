@@ -130,10 +130,16 @@ def fetch_go() -> dict:
     try:
         data = get_json(GO_URL, key)
         usage = data.get("usage") or data
-        return {
-            name: window((usage.get(name) or {}).get("percent"), (usage.get(name) or {}).get("resetsAt"))
-            for name in ("rolling", "weekly", "monthly")
-        }
+        windows = {}
+        for name in ("rolling", "weekly", "monthly"):
+            item = usage.get(name) or {}
+            # Only trust percent when the window reports healthy; a degraded
+            # window renders as "U -" rather than a possibly-stale number.
+            windows[name] = window(
+                item.get("percent") if item.get("status") == "ok" else None,
+                item.get("resetsAt"),
+            )
+        return windows
     except Exception as error:
         return {"error": str(error)}
 
