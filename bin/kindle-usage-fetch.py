@@ -99,10 +99,12 @@ def glm_monthly_tokens(key: str, start_ms: int, reset_ms: int, attempts: int = 3
                 # Window start is fixed until reset, so usage is monotonic within
                 # a cycle. A drop vs the last validated reading catches stale
                 # forms that pass every shape check (observed: right start and
-                # bucket count, near-zero tokens).
+                # bucket count, near-zero tokens). HOLD the last known good
+                # value: writing None would erase the floor and let the next
+                # run accept the same stale data.
                 if floor_tokens is not None and total < floor_tokens:
-                    _reject("monotonic-violation", f"{total:,} < previous {floor_tokens:,}", buckets)
-                    return None
+                    _reject("monotonic-violation", f"{total:,} < previous {floor_tokens:,} (holding)", buckets)
+                    return floor_tokens
                 return total
         except (KeyError, ValueError, OSError):
             pass  # retry; a None return renders as "U -" rather than a lie
@@ -110,13 +112,18 @@ def glm_monthly_tokens(key: str, start_ms: int, reset_ms: int, attempts: int = 3
 
 
 def previous_monthly_tokens(reset_ms: int) -> int | None:
-    """Token floor from the last persisted reading of the same cycle."""
+    """Token floor from the last validated reading of the same cycle."""
     try:
         prior = json.loads(OUT.read_text())
         monthly = (prior.get("glm") or {}).get("monthly") or {}
+        if monthly.get("resetMs") != reset_ms:
+            return None  # new cycle: floor resets
+        used = monthly.get("usedTokens")
+        if isinstance(used, (int, float)) and used >= 0:
+            return round(used)  # exact floor, no rounding ratchet
         pct = monthly.get("percentage")
-        if monthly.get("resetMs") == reset_ms and isinstance(pct, (int, float)):
-            # One percentage point of headroom absorbs rounding drift.
+        if isinstance(pct, (int, float)):
+            # Legacy readings without usedTokens: 1pt headroom absorbs rounding.
             return round((pct - 1) / 100 * GLM_MONTHLY_CAPACITY)
     except (OSError, ValueError, AttributeError):
         pass
@@ -158,6 +165,8 @@ def fetch_glm() -> dict:
                 "percentage": None if used is None else round(used / GLM_MONTHLY_CAPACITY * 100),
                 "resetMs": reset_ms,
             }
+            if used is not None:
+                monthly["usedTokens"] = used
         return {
             "fiveHour": window(five_hour.get("percentage"), five_hour.get("nextResetTime")),
             "weekly": window(weekly.get("percentage"), weekly.get("nextResetTime")),
